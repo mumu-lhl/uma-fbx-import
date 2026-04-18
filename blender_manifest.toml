@@ -83,5 +83,7 @@ paths_exclude_pattern = [
     ".ruff_cache/",
     ".gemini/",
     ".qwen/",
-    "*.json"
+    "*.json",
+    "*.tar.xz",
+    "blender-bin/"
 ]
