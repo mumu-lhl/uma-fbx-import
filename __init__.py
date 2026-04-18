@@ -266,6 +266,7 @@ class UMA_OT_one_click_import(bpy.types.Operator):
             bpy.ops.uma.fix_face_shapekeys()
             self.apply_armature_rotation(body_armature)
             self.fix_shoulder_bones(body_armature)
+            self.setup_body_material(body_armature, data_dir)
 
         return {"FINISHED"}
 
@@ -284,6 +285,85 @@ class UMA_OT_one_click_import(bpy.types.Operator):
 
         bpy.ops.object.mode_set(mode="OBJECT")
         bpy.context.view_layer.update()
+
+    def setup_body_material(self, body_armature: Object, data_dir: str):
+        body_mat = None
+        body_role_id = None
+        face_role_id = None
+
+        child_objects = list(body_armature.children_recursive)
+        child_objects.extend(body_armature.children)
+
+        for child in child_objects:
+            if child.type != "MESH":
+                continue
+            for mat_slot in child.material_slots:
+                mat = mat_slot.material
+                if not mat:
+                    continue
+
+                match_bdy = re.match(r"mtl_bdy(\d{4}_\d{2})", mat.name)
+                if match_bdy:
+                    body_mat = mat
+                    body_role_id = match_bdy.group(1)
+
+                match_face = re.match(r"mtl_chr(\d{4}_\d{2})_face", mat.name)
+                if match_face:
+                    face_role_id = match_face.group(1)
+
+        if not body_mat or not body_role_id:
+            return
+
+        role_id = body_role_id
+        if body_role_id.startswith("0") and face_role_id:
+            role_id = face_role_id
+
+        body_mat.name = f"mtl_bdy{role_id}"
+
+        tex_filename = f"tex_bdy{role_id}_diff.png"
+        tex_path = os.path.join(data_dir, tex_filename)
+
+        if not os.path.exists(tex_path):
+            self.report({"WARNING"}, f"Body texture not found: {tex_path}")
+            return
+
+        if not body_mat.use_nodes:
+            body_mat.use_nodes = True
+
+        nodes = body_mat.node_tree.nodes
+        links = body_mat.node_tree.links
+
+        principled_bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not principled_bsdf:
+            return
+
+        tex_node = next(
+            (
+                n
+                for n in nodes
+                if n.type == "TEX_IMAGE" and n.image and n.image.filepath == tex_path
+            ),
+            None,
+        )
+
+        if not tex_node:
+            tex_node = nodes.new("ShaderNodeTexImage")
+            tex_node.location = (
+                principled_bsdf.location.x - 300,
+                principled_bsdf.location.y,
+            )
+            try:
+                img = bpy.data.images.get(tex_filename)
+                if not img:
+                    img = bpy.data.images.load(tex_path)
+                tex_node.image = img
+            except Exception as e:
+                self.report({"ERROR"}, f"Failed to load image: {e}")
+                return
+
+        base_color_input = principled_bsdf.inputs.get("Base Color")
+        if base_color_input:
+            links.new(tex_node.outputs["Color"], base_color_input)
 
     def align_armature_location(
         self,
@@ -986,7 +1066,6 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
         bpy.context.view_layer.update()
 
         return new_shapekey
-
 
     def fix_eye_weights(self, armature, face_mesh):
         """实现眼睛骨骼修复：将眼睛骨骼权重合并到头部"""
