@@ -1,0 +1,42 @@
+name: Build and Release Blender Extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download and Setup Blender
+        run: |
+          URL="https://download.blender.org/release/Blender5.1/blender-5.1.1-linux-x64.tar.xz"
+          curl -L $URL -o blender.tar.xz
+          
+          mkdir blender-bin
+          tar -xf blender.tar.xz -C blender-bin --strip-components=1
+          
+          echo "$(pwd)/blender-bin" >> $GITHUB_PATH
+
+
+      - name: Build Extension
+        run: |
+          blender --command extension build
+          
+          echo "ZIP_FILE=$(ls *.zip | head -n 1)" >> $GITHUB_ENV
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: ${{ env.ZIP_FILE }}
+          name: ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
