@@ -1,0 +1,23 @@
+version = 1
+revision = 3
+requires-python = ">=3.13"
+
+[[package]]
+name = "fake-bpy-module-latest"
+version = "20260415"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a4/84/3915c1406a961ba57444affcc2eacbbeb1ed8719a5bc6c32c721959865a8/fake_bpy_module_latest-20260415.tar.gz", hash = "sha256:0c70477867111818fcf6d54f8bc251eac43b369ca6f6ac73b3ceb4ac8234b872", size = 898272, upload-time = "2026-04-15T07:20:00.849Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/49/61ea018fb3e45df960859f38f6d68bb791c8cbffb05a1ea060b2d5630b4b/fake_bpy_module_latest-20260415-py3-none-any.whl", hash = "sha256:75623532173457134b7f5e9d1e27a338bb61b36afa44d8505a4dee759a71e082", size = 1043092, upload-time = "2026-04-15T07:19:57.981Z" },
+]
+
+[[package]]
+name = "uma-fbx-import"
+version = "0.1.0"
+source = { virtual = "." }
+dependencies = [
+    { name = "fake-bpy-module-latest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "fake-bpy-module-latest", specifier = ">=20260412" }]
