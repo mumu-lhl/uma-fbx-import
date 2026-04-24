@@ -267,6 +267,7 @@ class UMA_OT_one_click_import(bpy.types.Operator):
             self.apply_armature_rotation(body_armature)
             self.fix_shoulder_bones(body_armature)
             self.setup_body_material(body_armature, data_dir)
+            self.setup_tail_material(body_armature, data_dir)
 
         return {"FINISHED"}
 
@@ -360,6 +361,78 @@ class UMA_OT_one_click_import(bpy.types.Operator):
             except Exception as e:
                 self.report({"ERROR"}, f"Failed to load image: {e}")
                 return
+
+        base_color_input = principled_bsdf.inputs.get("Base Color")
+        if base_color_input:
+            links.new(tex_node.outputs["Color"], base_color_input)
+
+    def setup_tail_material(self, body_armature: Object, data_dir: str):
+        tail_mat = None
+
+        child_objects = list(body_armature.children_recursive)
+        child_objects.extend(body_armature.children)
+
+        for child in child_objects:
+            if child.type != "MESH":
+                continue
+            for mat_slot in child.material_slots:
+                mat = mat_slot.material
+                if not mat:
+                    continue
+                if mat.name.startswith("mtl_tail"):
+                    tail_mat = mat
+                    break
+            if tail_mat:
+                break
+
+        if not tail_mat:
+            return
+
+        if not tail_mat.use_nodes:
+            tail_mat.use_nodes = True
+
+        nodes = tail_mat.node_tree.nodes
+        links = tail_mat.node_tree.links
+
+        principled_bsdf = next((n for n in nodes if n.type == "BSDF_PRINCIPLED"), None)
+        if not principled_bsdf:
+            return
+
+        # 检查是否已经存在贴图节点
+        existing_tex = next(
+            (n for n in nodes if n.type == "TEX_IMAGE" and n.image), None
+        )
+        if existing_tex:
+            # 已有贴图节点，无需添加
+            return
+
+        # 在数据目录中匹配 tex_tail*_diff.png 贴图
+        tex_path = None
+        tex_filename = None
+        for f in os.scandir(data_dir):
+            if f.is_file() and re.match(r"^tex_tail.*_diff\.png$", f.name):
+                tex_path = f.path
+                tex_filename = f.name
+                break
+
+        if not tex_path:
+            self.report({"WARNING"}, "Tail texture (tex_tail*_diff.png) not found")
+            return
+
+        # 添加贴图节点并连接到原理化BSDF
+        tex_node = nodes.new("ShaderNodeTexImage")
+        tex_node.location = (
+            principled_bsdf.location.x - 300,
+            principled_bsdf.location.y,
+        )
+        try:
+            img = bpy.data.images.get(tex_filename)
+            if not img:
+                img = bpy.data.images.load(tex_path)
+            tex_node.image = img
+        except Exception as e:
+            self.report({"ERROR"}, f"Failed to load tail image: {e}")
+            return
 
         base_color_input = principled_bsdf.inputs.get("Base Color")
         if base_color_input:
