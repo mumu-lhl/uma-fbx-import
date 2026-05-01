@@ -232,6 +232,10 @@ class UMA_OT_one_click_import(bpy.types.Operator):
         imported_armatures: list[Object] = []
         for filepath in fbx_files:
             bpy.ops.import_scene.fbx(filepath=filepath)
+            for obj in bpy.context.selected_objects:
+                if obj.type == "MESH":
+                    if "Attribute" in obj.data.color_attributes:
+                        obj.data.color_attributes["Attribute"].name = "VertexColors"
 
         for obj in bpy.data.objects:
             if obj.type == "ARMATURE":

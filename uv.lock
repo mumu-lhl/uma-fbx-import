@@ -4,11 +4,11 @@ requires-python = ">=3.13"
 
 [[package]]
 name = "fake-bpy-module-latest"
-version = "20260415"
+version = "20260501"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/a4/84/3915c1406a961ba57444affcc2eacbbeb1ed8719a5bc6c32c721959865a8/fake_bpy_module_latest-20260415.tar.gz", hash = "sha256:0c70477867111818fcf6d54f8bc251eac43b369ca6f6ac73b3ceb4ac8234b872", size = 898272, upload-time = "2026-04-15T07:20:00.849Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/30/8c/82524144ff1c33f087ed17da2fa9ed237cb681275aee18f0ed60df8a5200/fake_bpy_module_latest-20260501.tar.gz", hash = "sha256:e7cf1efc6286fdd266660e8e49d622e66694022b0ac2ec4d9d4eace5ea0ac851", size = 899868, upload-time = "2026-05-01T08:02:07.803Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/46/49/61ea018fb3e45df960859f38f6d68bb791c8cbffb05a1ea060b2d5630b4b/fake_bpy_module_latest-20260415-py3-none-any.whl", hash = "sha256:75623532173457134b7f5e9d1e27a338bb61b36afa44d8505a4dee759a71e082", size = 1043092, upload-time = "2026-04-15T07:19:57.981Z" },
+    { url = "https://files.pythonhosted.org/packages/d9/52/5d45e239b168d90b3950f833548e1aeb06172be5ae11f0d834c32f9bc438/fake_bpy_module_latest-20260501-py3-none-any.whl", hash = "sha256:6bfc5acb3f12a699ed6569b6be87f58d7a3d0dc45f8328eb834b867159eaa1a4", size = 1044675, upload-time = "2026-05-01T08:02:05.634Z" },
 ]
 
 [[package]]
