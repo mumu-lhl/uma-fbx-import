@@ -855,26 +855,22 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
 
         return eul.to_quaternion()
 
-    def transform_bone(
-        self, obj, bone_name: str, position, scale, rotation, is_override: bool
-    ):
+    def transform_bone(self, obj, bone_name: str, position, scale, rotation):
         bone = obj.pose.bones[bone_name]
 
-        if is_override:
-            bone.location = Vector((position["x"], -position["z"], position["y"]))
-            bone.scale = Vector((scale["x"], scale["y"], scale["z"]))
-
-            bone.rotation_mode = "XYZ"
-            bone.rotation_euler[0] = rotation["x"]
-            bone.rotation_euler[1] = rotation["y"]
-            bone.rotation_euler[2] = rotation["z"]
-        else:
-            bone.location += Vector((-position["x"], position["y"], position["z"]))
-            bone.scale += Vector((scale["x"], scale["y"], scale["z"]))
-
-            bone.rotation_quaternion = self.rot_from_maya(
-                (rotation["x"], rotation["y"], rotation["z"])
-            )
+        # Facial-target entries are additive deltas, including entries marked
+        # IsOverrideTarget.  UmaViewer applies all of them as deltas from the
+        # base target; treating those entries as absolute TRS collapses or
+        # negatively scales the DrivenA/EyelidHide bones.
+        #
+        # The Blender FBX import maps the source local translation as
+        # (x, y, z) -> (-x, y, z).  Keep this conversion in armature-local
+        # space, before the armature object's later rotation is applied.
+        bone.location += Vector((-position["x"], position["y"], position["z"]))
+        bone.scale += Vector((scale["x"], scale["y"], scale["z"]))
+        bone.rotation_quaternion = self.rot_from_maya(
+            (rotation["x"], rotation["y"], rotation["z"])
+        )
 
         bpy.context.view_layer.update()
 
@@ -1100,8 +1096,6 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
             position = trs["_position"].copy()
             scale = trs["_scale"].copy()
             rotation = trs["_rotation"].copy()
-            is_override = trs["IsOverrideTarget"] == 1
-
             if mirror:
                 # Mirror bone name suffix
                 if bone_name.endswith("_L"):
@@ -1124,7 +1118,6 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
                 position,
                 scale,
                 rotation,
-                is_override,
             )
 
         # Update viewport to apply deformations to mesh

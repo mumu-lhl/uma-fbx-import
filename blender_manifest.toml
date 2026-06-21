@@ -4,7 +4,7 @@ schema_version = "1.0.0"
 # Change the values according to your extension
 id = "uma_fbx_import"
 version = "0.1.4"
-name = "Uma_fbx_import"
+name = "Uma Fbx Import"
 tagline = "This is another extension"
 maintainer = "Mumulhl (沐沐13号)"
 # Supported types: "add-on", "theme"
