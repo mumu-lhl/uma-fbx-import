@@ -27,7 +27,7 @@ bl_info = {
     "author": "Mumulhl (沐沐13号)",
     "description": "",
     "blender": (3, 6, 0),
-    "version": (0, 1, 4),
+    "version": (0, 1, 6),
     "location": "View3D > UI > UMA Fbx Import",
     "warning": "",
     "category": "Generic",
