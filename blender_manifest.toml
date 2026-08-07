@@ -3,7 +3,7 @@ schema_version = "1.0.0"
 # Example of manifest file for a Blender extension
 # Change the values according to your extension
 id = "uma_fbx_import"
-version = "0.1.6"
+version = "0.1.7"
 name = "Uma Fbx Import"
 tagline = "This is another extension"
 maintainer = "Mumulhl (沐沐13号)"
