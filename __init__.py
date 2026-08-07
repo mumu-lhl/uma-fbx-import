@@ -19,7 +19,13 @@ import re
 
 import bpy
 import math
-from mathutils import Euler, Quaternion, Vector, Matrix
+from mathutils import Quaternion, Vector, Matrix
+
+from .facial_transforms import (
+    aggregate_transform_deltas,
+    unity_euler_degrees_to_blender_quaternion,
+    unity_position_to_blender,
+)
 
 
 bl_info = {
@@ -847,13 +853,8 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
         bpy.context.view_layer.update()
 
     def rot_from_maya(self, euler_angle) -> Quaternion:
-        rad_x = math.radians(euler_angle[0])
-        rad_y = math.radians(euler_angle[1])
-        rad_z = math.radians(euler_angle[2])
-
-        eul = Euler((rad_x, rad_y, rad_z), "XYZ")
-
-        return eul.to_quaternion()
+        x, y, z, w = unity_euler_degrees_to_blender_quaternion(euler_angle)
+        return Quaternion((w, x, y, z))
 
     def transform_bone(self, obj, bone_name: str, position, scale, rotation):
         bone = obj.pose.bones[bone_name]
@@ -864,10 +865,16 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
         # negatively scales the DrivenA/EyelidHide bones.
         #
         # The Blender FBX import maps the source local translation as
-        # (x, y, z) -> (-x, y, z).  Keep this conversion in armature-local
-        # space, before the armature object's later rotation is applied.
-        bone.location += Vector((-position["x"], position["y"], position["z"]))
+        # (x, y, z) -> (-x, y, z).  Rotations need the corresponding
+        # handedness conversion in the same armature-local space.  Keep both
+        # conversions before the armature object's later rotation is applied.
+        bone.location += Vector(
+            unity_position_to_blender(
+                (position["x"], position["y"], position["z"])
+            )
+        )
         bone.scale += Vector((scale["x"], scale["y"], scale["z"]))
+        bone.rotation_mode = "QUATERNION"
         bone.rotation_quaternion = self.rot_from_maya(
             (rotation["x"], rotation["y"], rotation["z"])
         )
@@ -1091,27 +1098,18 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
     ):
         """Helper to apply bone transforms (with optional mirroring) and capture a shape key"""
         # 1. Apply transformations
-        for trs in trs_array:
-            bone_name = trs["_path"]
-            position = trs["_position"].copy()
-            scale = trs["_scale"].copy()
-            rotation = trs["_rotation"].copy()
-            if mirror:
-                # Mirror bone name suffix
-                if bone_name.endswith("_L"):
-                    bone_name = bone_name[:-2] + "_R"
-                elif bone_name.endswith("_R"):
-                    bone_name = bone_name[:-2] + "_L"
-
-                # Mirror position X (assuming X is left/right)
-                position["x"] = -position["x"]
-                # Mirror rotation Y and Z (assuming mirroring across YZ plane in Maya/UMA space)
-                rotation["y"] = -rotation["y"]
-                rotation["z"] = -rotation["z"]
-
+        # UmaViewer sums every position, scale, and rotation delta belonging
+        # to the same transform before applying the result.  Some characters
+        # contain duplicate paths in one facial target; applying only the last
+        # rotation makes those shape keys character-dependent.
+        transform_deltas = aggregate_transform_deltas(trs_array, mirror=mirror)
+        for bone_name, delta in transform_deltas.items():
             if bone_name not in armature.pose.bones:
                 continue
 
+            position = dict(zip(("x", "y", "z"), delta["position"]))
+            scale = dict(zip(("x", "y", "z"), delta["scale"]))
+            rotation = dict(zip(("x", "y", "z"), delta["rotation"]))
             self.transform_bone(
                 armature,
                 bone_name,
