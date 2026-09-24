@@ -13,6 +13,7 @@
 
 from bpy.types import Object
 from bpy.types import PoseBone
+import array
 import json
 import os
 import re
@@ -887,11 +888,12 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
                         return obj
         return None
 
-    def capture_deformed_vertices_to_shapekey(self, face_mesh, shapekey_name):
+    def capture_deformed_vertices_to_shapekey(
+        self, face_mesh, shapekey_name, vertex_buffer=None
+    ):
         # Get the evaluated mesh (with armature modifier applied)
         depsgraph = bpy.context.evaluated_depsgraph_get()
         evaluated_obj = face_mesh.evaluated_get(depsgraph)
-        mesh_temp = evaluated_obj.to_mesh()
 
         # Check if Basis shape key exists
         if (
@@ -899,20 +901,19 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
             or "Basis" not in face_mesh.data.shape_keys.key_blocks
         ):
             self.report({"ERROR"}, "Basis shapekey not found")
-            evaluated_obj.to_mesh_clear()
             return None
 
         # Create new shape key
         new_shapekey = face_mesh.shape_key_add(name=shapekey_name, from_mix=False)
 
-        # Copy vertex positions from evaluated mesh to shape key
-        shapekey_block = new_shapekey
-        for i, vertex in enumerate(mesh_temp.vertices):
-            if i < len(shapekey_block.data):
-                shapekey_block.data[i].co = vertex.co
-
-        # Clean up temporary mesh
-        evaluated_obj.to_mesh_clear()
+        # Fast transfer of vertex positions via foreach_get / foreach_set
+        if vertex_buffer is not None:
+            evaluated_obj.data.vertices.foreach_get("co", vertex_buffer)
+            new_shapekey.data.foreach_set("co", vertex_buffer)
+        else:
+            buf = array.array("f", [0.0] * (len(face_mesh.data.vertices) * 3))
+            evaluated_obj.data.vertices.foreach_get("co", buf)
+            new_shapekey.data.foreach_set("co", buf)
 
         return new_shapekey
 
@@ -941,16 +942,19 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
             }
         return bone_states
 
-    def restore_bone_states(self, armature, bone_states):
-        """Restore bones to their original states"""
-        for bone_name, state in bone_states.items():
+    def restore_bone_states(self, armature, bone_states, bone_names=None):
+        """Restore bones to their original states (supports restoring only specified bones)"""
+        targets = bone_names if bone_names is not None else bone_states.keys()
+        for bone_name in targets:
+            state = bone_states.get(bone_name)
+            if not state or bone_name not in armature.pose.bones:
+                continue
             bone = armature.pose.bones[bone_name]
             bone.location = state["location"]
             bone.rotation_mode = state["rotation_mode"]
             bone.rotation_euler = state["rotation_euler"]
             bone.rotation_quaternion = state["rotation_quaternion"]
             bone.scale = state["scale"]
-        bpy.context.view_layer.update()
 
     def rot_from_maya(self, euler_angle) -> Quaternion:
         x, y, z, w = unity_euler_degrees_to_blender_quaternion(euler_angle)
@@ -978,8 +982,6 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
         bone.rotation_quaternion = self.rot_from_maya(
             (rotation["x"], rotation["y"], rotation["z"])
         )
-
-        bpy.context.view_layer.update()
 
     def execute(self, context):
         armature = context.active_object
@@ -1033,6 +1035,9 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
 
         # Create Basis shapekey NOW (bones are still in rest state)
         self.create_basis_shapekey(face_mesh)
+
+        # Preallocate buffer for fast vertex coordinate transfer
+        coord_buffer = array.array("f", [0.0] * (len(face_mesh.data.vertices) * 3))
 
         # Load JSON data
         with open(filepath, "r", encoding="utf-8") as f:
@@ -1095,6 +1100,7 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
                             sk_name,
                             original_bone_states,
                             mirror=mirror_mode,
+                            vertex_buffer=coord_buffer,
                         )
 
                         if new_shapekey is None:
@@ -1195,6 +1201,7 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
         shapekey_name,
         original_bone_states,
         mirror=False,
+        vertex_buffer=None,
     ):
         """Helper to apply bone transforms (with optional mirroring) and capture a shape key"""
         # 1. Apply transformations
@@ -1203,6 +1210,7 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
         # contain duplicate paths in one facial target; applying only the last
         # rotation makes those shape keys character-dependent.
         transform_deltas = aggregate_transform_deltas(trs_array, mirror=mirror)
+        modified_bones = []
         for bone_name, delta in transform_deltas.items():
             if bone_name not in armature.pose.bones:
                 continue
@@ -1217,21 +1225,21 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
                 scale,
                 rotation,
             )
+            modified_bones.append(bone_name)
 
-        # Update viewport to apply deformations to mesh
+        # Update viewport once to apply deformations to mesh
         bpy.context.view_layer.update()
 
         # 2. Capture shapekey
         new_shapekey = self.capture_deformed_vertices_to_shapekey(
-            face_mesh, shapekey_name
+            face_mesh, shapekey_name, vertex_buffer=vertex_buffer
         )
 
         if new_shapekey:
             new_shapekey.value = 0.0
 
-        # 3. Restore bones to rest state
-        self.restore_bone_states(armature, original_bone_states)
-        bpy.context.view_layer.update()
+        # 3. Restore only modified bones to rest state
+        self.restore_bone_states(armature, original_bone_states, modified_bones)
 
         return new_shapekey
 
