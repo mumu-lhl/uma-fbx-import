@@ -235,13 +235,27 @@ class UMA_OT_one_click_import(bpy.types.Operator):
             )
             return {"CANCELLED"}
 
+        existing_objects = set(bpy.data.objects)
         imported_armatures: list[Object] = []
+        imported_empties: list[Object] = []
         for filepath in fbx_files:
             bpy.ops.import_scene.fbx(filepath=filepath)
             for obj in bpy.context.selected_objects:
                 if obj.type == "MESH":
                     if "Attribute" in obj.data.color_attributes:
                         obj.data.color_attributes["Attribute"].name = "VertexColors"
+                elif obj.type == "EMPTY":
+                    imported_empties.append(obj)
+
+        for obj in bpy.data.objects:
+            if (
+                obj not in existing_objects
+                and obj.type == "EMPTY"
+                and obj not in imported_empties
+            ):
+                imported_empties.append(obj)
+
+        self.delete_imported_empties(imported_empties)
 
         for obj in bpy.data.objects:
             if obj.type == "ARMATURE":
@@ -280,6 +294,26 @@ class UMA_OT_one_click_import(bpy.types.Operator):
             self.setup_tail_material(body_armature, data_dir)
 
         return {"FINISHED"}
+
+    def delete_imported_empties(self, empties: list[Object]):
+        """删除导入的空物体"""
+        for empty in empties:
+            try:
+                if (
+                    not empty
+                    or empty.name not in bpy.data.objects
+                    or empty.type != "EMPTY"
+                ):
+                    continue
+                for child in list(empty.children):
+                    world_mat = child.matrix_world.copy()
+                    child.parent = empty.parent
+                    child.matrix_world = world_mat
+                bpy.data.objects.remove(empty, do_unlink=True)
+            except ReferenceError:
+                continue
+
+        bpy.context.view_layer.update()
 
     def fix_shoulder_bones(self, armature: Object):
         """将 Shoulder 骨骼的尾端对齐到 Arm 骨骼的头端"""
