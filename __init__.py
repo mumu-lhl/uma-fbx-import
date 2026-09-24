@@ -591,7 +591,7 @@ class UMA_OT_one_click_import(bpy.types.Operator):
         bpy.context.view_layer.update()
 
     def process_head_armature(self, head_armature: Object, body_armature: Object):
-        """处理头部：删除无用骨骼 -> 平移 -> 重命名 -> 合并 -> 连接到脖子"""
+        """处理头部：删除无用骨骼 -> 平移 -> 合并 -> 将头部子骨骼直接挂载到身体 Head/Neck"""
         # 1. 删除 pfb_chr 开头的无用骨骼
         self.delete_pfb_chr_bones(head_armature)
 
@@ -603,21 +603,87 @@ class UMA_OT_one_click_import(bpy.types.Operator):
             source_bone_name="Neck",
         )
 
-        # 3. 重命名 Neck 和 Head 骨骼（保护性重命名）
-        head_bone_map = self.rename_bones_and_vertex_groups(
-            head_armature, ["Neck", "Head"], "Chr"
-        )
-        if not head_bone_map:
-            return
+        # 3. 记录骨骼绑定的物体 (如 M_Line00, M_Tear_L, M_Tear_R)
+        bone_parented_objects = []
+        for child in head_armature.children:
+            if child.parent_type == "BONE":
+                bone_parented_objects.append(
+                    (child, child.parent_bone, child.matrix_world.copy())
+                )
+
+        # 重命名 head_armature 中的 Neck 和 Head 为临时骨骼名称，以便合并骨架时不产生名称冲突
+        temp_neck = "__TEMP_CHR_NECK__"
+        temp_head = "__TEMP_CHR_HEAD__"
+        if "Neck" in head_armature.data.bones:
+            head_armature.data.bones["Neck"].name = temp_neck
+        if "Head" in head_armature.data.bones:
+            head_armature.data.bones["Head"].name = temp_head
 
         # 4. 合并骨架
         self.rebind_child_mesh_armature_modifiers(head_armature, body_armature)
         self.merge_armature_into_body(head_armature, body_armature)
 
-        # 5. 绑定到身体的 Neck 上
-        self.link_bones_to_body(body_armature, head_bone_map)
+        # 5. 将骨骼绑定的物体直接指向身体骨架的 Head/Neck 骨骼
+        for child, orig_bone, orig_matrix in bone_parented_objects:
+            target_bone = (
+                "Head"
+                if orig_bone in ("Head", temp_head)
+                else ("Neck" if orig_bone in ("Neck", temp_neck) else orig_bone)
+            )
+            child.parent = body_armature
+            child.parent_type = "BONE"
+            child.parent_bone = target_bone
+            child.matrix_world = orig_matrix
 
-        # 6. 修复 Sp_ 骨骼朝向
+        # 重新挂载子骨骼到身体的原生 Head / Neck，并删除临时骨骼，避免出现 Chr_Head/Chr_Neck
+        bpy.ops.object.mode_set(mode="EDIT")
+        edit_bones = body_armature.data.edit_bones
+        body_head = edit_bones.get("Head")
+        body_neck = edit_bones.get("Neck")
+        chr_head = edit_bones.get(temp_head)
+        chr_neck = edit_bones.get(temp_neck)
+
+        if body_head and chr_head:
+            body_head.tail = chr_head.tail
+            for child in list(chr_head.children):
+                child.parent = body_head
+                child.use_connect = False
+
+        if body_neck and chr_neck:
+            for child in list(chr_neck.children):
+                if child != chr_head:
+                    child.parent = body_neck
+                    child.use_connect = False
+
+        if chr_head:
+            edit_bones.remove(chr_head)
+        if chr_neck:
+            edit_bones.remove(chr_neck)
+
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+        # 6. 将网格上的临时顶点组名称映射回 Head / Neck
+        for child in body_armature.children_recursive:
+            if child.type == "MESH":
+                for temp_name, real_name in [(temp_head, "Head"), (temp_neck, "Neck")]:
+                    if temp_name in child.vertex_groups:
+                        if real_name in child.vertex_groups:
+                            mod = child.modifiers.new(
+                                name=f"TMP_MIX_{real_name}", type="VERTEX_WEIGHT_MIX"
+                            )
+                            mod.vertex_group_a = real_name
+                            mod.vertex_group_b = temp_name
+                            mod.mix_mode = "ADD"
+                            mod.mix_set = "ALL"
+                            bpy.context.view_layer.objects.active = child
+                            bpy.ops.object.modifier_apply(modifier=mod.name)
+                            child.vertex_groups.remove(child.vertex_groups[temp_name])
+                        else:
+                            child.vertex_groups[temp_name].name = real_name
+
+        bpy.context.view_layer.update()
+
+        # 7. 修复 Sp_ 骨骼朝向
         self.fix_sp_bone_orientations(body_armature)
 
     def delete_pfb_tail_bones(self, tail_armature: Object):
