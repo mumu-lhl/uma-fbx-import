@@ -173,6 +173,205 @@ def select_pose_bone(pose_bone: PoseBone):
     else:
         pose_bone.bone.select = True
 
+ROOT_BONES = {"Position"}
+
+BODY_BONES = {
+    "Eye_L",
+    "Eye_R",
+    "Head",
+    "Neck",
+    "Chest",
+    "Spine",
+    "Waist",
+    "UpBody_Ctrl",
+    "Hip",
+}
+
+ARM_BONES = {
+    "Shoulder_L",
+    "Shoulder_R",
+    "Arm_L",
+    "Arm_R",
+    "ShoulderRoll_L",
+    "ShoulderRoll_R",
+    "ArmRoll_L",
+    "ArmRoll_R",
+    "Elbow_L",
+    "Elbow_R",
+    "Wrist_L",
+    "Wrist_R",
+    "Hand_Attach_L",
+    "Hand_Attach_R",
+}
+
+LEG_BONES = {
+    "Thigh_L",
+    "Thigh_R",
+    "Knee_L",
+    "Knee_R",
+    "Ankle_L",
+    "Ankle_R",
+    "Ankle_offset_L",
+    "Ankle_offset_R",
+    "Toe_L",
+    "Toe_R",
+    "Toe_offset_L",
+    "Toe_offset_R",
+}
+
+FINGER_BONES = {
+    "Thumb_01_L",
+    "Thumb_02_L",
+    "Thumb_03_L",
+    "Index_01_L",
+    "Index_02_L",
+    "Index_03_L",
+    "Middle_01_L",
+    "Middle_02_L",
+    "Middle_03_L",
+    "Ring_01_L",
+    "Ring_02_L",
+    "Ring_03_L",
+    "Pinky_01_L",
+    "Pinky_02_L",
+    "Pinky_03_L",
+    "Thumb_01_R",
+    "Thumb_02_R",
+    "Thumb_03_R",
+    "Index_01_R",
+    "Index_02_R",
+    "Index_03_R",
+    "Middle_01_R",
+    "Middle_02_R",
+    "Middle_03_R",
+    "Ring_01_R",
+    "Ring_02_R",
+    "Ring_03_R",
+    "Pinky_01_R",
+    "Pinky_02_R",
+    "Pinky_03_R",
+}
+
+FACE_EXACT_BONES = {
+    "Chin",
+    "Nose",
+    "M_Line00",
+    "M_Cheek",
+    "M_Eye",
+    "M_Mayu_L",
+    "M_Mayu_R",
+    "M_Mouth",
+}
+
+OTHERS_EXACT_BONES = {
+    "Wrist_L_Pole",
+    "Wrist_R_Pole",
+    "Wrist_L_Target",
+    "Wrist_R_Target",
+}
+
+BONE_COLLECTION_SPECS = [
+    ("Root", False),
+    ("Body", True),
+    ("Arm", True),
+    ("Leg", True),
+    ("Finger", True),
+    ("Hair", False),
+    ("Tail", False),
+    ("Ear", False),
+    ("Phys", False),
+    ("Handle", False),
+    ("Face", False),
+    ("Others", False),
+    ("Unassigned", True),
+]
+
+
+def get_bone_collection_name(name: str) -> str:
+    """根据骨骼名称判定所属骨骼集合"""
+    if name in ROOT_BONES:
+        return "Root"
+    if name in BODY_BONES:
+        return "Body"
+    if name in ARM_BONES:
+        return "Arm"
+    if name in LEG_BONES:
+        return "Leg"
+    if name in FINGER_BONES:
+        return "Finger"
+    if name.endswith("Handle"):
+        return "Handle"
+    if "Hair" in name:
+        return "Hair"
+    if "Tail" in name:
+        return "Tail"
+    if "Ear" in name and not name.startswith("Sp_"):
+        return "Ear"
+    if name.startswith("Sp_He_Ear"):
+        return "Others"
+    if "Sp_" in name:
+        return "Phys"
+    if (
+        (name.startswith("Eye") and name not in {"Eye_L", "Eye_R"})
+        or name.startswith(
+            ("Mouth", "Cheek", "Tooth", "Tongue", "Eyebrow", "Eyelashes")
+        )
+        or name in FACE_EXACT_BONES
+    ):
+        return "Face"
+    if name in OTHERS_EXACT_BONES or (
+        name.startswith("Head") and name not in {"Head", "Head_Handle"}
+    ):
+        return "Others"
+    return "Unassigned"
+
+
+def classify_bone_collections(armature: Object) -> dict[str, int]:
+    """
+    参考 uma_addon 将骨架中的骨骼分类到合适的集合 (Bone Collections)。
+    Blender 4.0+ 支持 armature.data.collections。
+    """
+    if not hasattr(armature.data, "collections"):
+        return {}
+
+    data = armature.data
+    current_mode = armature.mode
+    if current_mode == "EDIT":
+        bpy.ops.object.mode_set(mode="OBJECT")
+
+    # 按规范顺序预创建集合并设置默认可见性
+    spec_map = dict(BONE_COLLECTION_SPECS)
+    for cname, is_vis in BONE_COLLECTION_SPECS:
+        if cname == "Unassigned":
+            continue
+        coll = data.collections.get(cname)
+        if not coll:
+            coll = data.collections.new(cname)
+        coll.is_visible = is_vis
+
+    counts: dict[str, int] = {}
+    for bone in data.bones:
+        cname = get_bone_collection_name(bone.name)
+        coll = data.collections.get(cname)
+        if not coll:
+            coll = data.collections.new(cname)
+            coll.is_visible = spec_map.get(cname, True)
+        for c in list(bone.collections):
+            if c != coll:
+                c.unassign(bone)
+        coll.assign(bone)
+        counts[cname] = counts.get(cname, 0) + 1
+
+    # 移除空集合（如未使用的分类或默认的空集合）
+    for coll in list(data.collections):
+        if len(coll.bones) == 0:
+            data.collections.remove(coll)
+
+    if current_mode == "EDIT":
+        bpy.ops.object.mode_set(mode="EDIT")
+
+    return counts
+
 
 # ─── Blender Panel ─────────────────────────────────────────────────────────────
 
@@ -193,6 +392,7 @@ class UMA_PT_panel(bpy.types.Panel):
         layout.prop(scene, "uma_data_directory")
         layout.operator("uma.one_click_import")
         layout.operator("uma.fix_face_shapekeys")
+        layout.operator("uma.set_bone_collections")
 
 
 # ─── Blender Operator ──────────────────────────────────────────────────────────
@@ -293,6 +493,7 @@ class UMA_OT_one_click_import(bpy.types.Operator):
             self.fix_shoulder_bones(body_armature)
             self.setup_body_material(body_armature, data_dir)
             self.setup_tail_material(body_armature, data_dir)
+            classify_bone_collections(body_armature)
 
         return {"FINISHED"}
 
@@ -577,6 +778,9 @@ class UMA_OT_one_click_import(bpy.types.Operator):
 
     def delete_pfb_chr_bones(self, head_armature: Object):
         """删除头部骨架上 pfb_chr 开头的无用骨骼"""
+        bpy.ops.object.select_all(action="DESELECT")
+        head_armature.select_set(True)
+        bpy.context.view_layer.objects.active = head_armature
         bpy.ops.object.mode_set(mode="EDIT")
         edit_bones = head_armature.data.edit_bones
 
@@ -689,6 +893,9 @@ class UMA_OT_one_click_import(bpy.types.Operator):
 
     def delete_pfb_tail_bones(self, tail_armature: Object):
         """删除尾巴骨架上 pfb_tail 开头的无用骨骼"""
+        bpy.ops.object.select_all(action="DESELECT")
+        tail_armature.select_set(True)
+        bpy.context.view_layer.objects.active = tail_armature
         bpy.ops.object.mode_set(mode="EDIT")
         edit_bones = tail_armature.data.edit_bones
 
@@ -705,6 +912,9 @@ class UMA_OT_one_click_import(bpy.types.Operator):
 
     def scale_tail_ctrl_bone(self, tail_armature: Object, scale_factor: float = 2.0):
         """放大 Tail_Ctrl 骨骼，保持头端位置不动"""
+        bpy.ops.object.select_all(action="DESELECT")
+        tail_armature.select_set(True)
+        bpy.context.view_layer.objects.active = tail_armature
         bpy.ops.object.mode_set(mode="EDIT")
         edit_bones = tail_armature.data.edit_bones
 
@@ -1280,10 +1490,36 @@ class UMA_OT_fix_face_shapekeys(bpy.types.Operator):
                         face_mesh.vertex_groups.remove(vg)
 
 
+class UMA_OT_set_bone_collections(bpy.types.Operator):
+    """分类骨骼集合 (Bone Collections)"""
+
+    bl_idname = "uma.set_bone_collections"
+    bl_label = "分类骨骼集合"
+    bl_options = {"REGISTER", "UNDO"}
+
+    @classmethod
+    def poll(cls, context):
+        return (
+            context.active_object is not None
+            and context.active_object.type == "ARMATURE"
+        )
+
+    def execute(self, context):
+        armature = context.active_object
+        counts = classify_bone_collections(armature)
+        total = sum(counts.values())
+        self.report(
+            {"INFO"},
+            f"已将 {total} 根骨骼分类至 {len(counts)} 个集合",
+        )
+        return {"FINISHED"}
+
+
 def register():
     bpy.utils.register_class(UMA_PT_panel)
     bpy.utils.register_class(UMA_OT_one_click_import)
     bpy.utils.register_class(UMA_OT_fix_face_shapekeys)
+    bpy.utils.register_class(UMA_OT_set_bone_collections)
     bpy.types.Scene.uma_data_directory = bpy.props.StringProperty(
         name="数据目录", description="Select the data directory", subtype="DIR_PATH"
     )
@@ -1291,6 +1527,7 @@ def register():
 
 def unregister():
     del bpy.types.Scene.uma_data_directory
+    bpy.utils.unregister_class(UMA_OT_set_bone_collections)
     bpy.utils.unregister_class(UMA_OT_fix_face_shapekeys)
     bpy.utils.unregister_class(UMA_OT_one_click_import)
     bpy.utils.unregister_class(UMA_PT_panel)
